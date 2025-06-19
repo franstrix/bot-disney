@@ -3,16 +3,19 @@ import random
 import string
 import datetime
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, ContextTypes,
+    ConversationHandler, MessageHandler, filters
+)
 
-# Tu token real está en las variables de entorno
 import os
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-ADMIN_ID = 6828410834  # Reemplazar con tu ID real de Telegram
+ADMIN_ID = 6828410834  # Reemplaza con tu verdadero ID de Telegram
 CLAVES_FILE = "claves.json"
 
-# --- Utilidades ---
+# ----------------------- FUNCIONES -----------------------
+
 def cargar_claves():
     try:
         with open(CLAVES_FILE, "r") as f:
@@ -27,11 +30,15 @@ def guardar_claves(data):
 def generar_clave(longitud=5):
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=longitud))
 
-# --- Estados para la creación de clave ---
+# ------------------- ESTADOS DE CONVERSACIÓN -------------------
 CORREO, DIAS = range(2)
 
+# ------------------- COMANDOS -------------------
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"👋 Hola, tu ID es: {update.effective_user.id}\nUsa /codigo correo clave para obtener tu código.")
+    await update.message.reply_text(
+        f"👋 Hola, tu ID es: {update.effective_user.id}\nUsa /codigo correo clave para obtener tu código."
+    )
 
 async def crear_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -60,7 +67,11 @@ async def recibir_dias(update: Update, context: ContextTypes.DEFAULT_TYPE):
     claves[clave] = {"correo": correo, "expira": fecha_exp}
     guardar_claves(claves)
 
-    mensaje = f"🔑 ENVÍA ESTO A TU CLIENTE:\n/codigo {correo} {clave}\n\n✅ Puede recibir códigos durante {dias} días."
+    mensaje = (
+        f"🔑 ENVÍA ESTO A TU CLIENTE:\n"
+        f"/codigo {correo} {clave}\n\n"
+        f"✅ Puede recibir códigos durante {dias} días."
+    )
     await update.message.reply_text(mensaje)
     return ConversationHandler.END
 
@@ -91,7 +102,8 @@ async def codigo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"✅ Registro exitoso.\nPodrás recibir códigos del correo {correo} durante {dias_restantes} días."
     )
 
-# --- Main ---
+# ------------------- CONFIGURACIÓN DEL BOT -------------------
+
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
