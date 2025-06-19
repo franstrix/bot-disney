@@ -1,26 +1,18 @@
 import json
+import random
+import string
 import datetime
-import logging
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ConversationHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes, ConversationHandler, MessageHandler, filters
 
+# Tu token real está en las variables de entorno
 import os
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# Configura tu token y tu ID de admin
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = 6828410834  # <- Reemplaza con tu verdadero ID (el bot te lo dice al usar /start)
-
-# Configuración del log
-logging.basicConfig(level=logging.INFO)
-
-# Archivos
+ADMIN_ID = 6828410834  # Reemplazar con tu ID real de Telegram
 CLAVES_FILE = "claves.json"
-USUARIOS_ULTIMO_USO = {}
 
-# Conversación para crear key
-CORREO, CLAVE, DIAS = range(3)
-
-# Cargar claves desde archivo
+# --- Utilidades ---
 def cargar_claves():
     try:
         with open(CLAVES_FILE, "r") as f:
@@ -28,17 +20,19 @@ def cargar_claves():
     except:
         return {}
 
-# Guardar claves
-def guardar_claves(claves):
+def guardar_claves(data):
     with open(CLAVES_FILE, "w") as f:
-        json.dump(claves, f, indent=2)
+        json.dump(data, f)
 
-# /start
+def generar_clave(longitud=5):
+    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=longitud))
+
+# --- Estados para la creación de clave ---
+CORREO, DIAS = range(2)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    await update.message.reply_text(f"👋 Hola, tu ID es: {user_id}\nUsa /codigo correo clave para obtener tu código.")
+    await update.message.reply_text(f"👋 Hola, tu ID es: {update.effective_user.id}\nUsa /codigo correo clave para obtener tu código.")
 
-# /crear_key
 async def crear_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ No tienes permiso para usar este comando.")
@@ -46,92 +40,72 @@ async def crear_key(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("📧 Ingresa el correo del cliente:")
     return CORREO
 
-async def ingresar_correo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def recibir_correo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["correo"] = update.message.text.strip()
-    await update.message.reply_text("🔐 Ingresa la clave que usará el cliente:")
-    return CLAVE
-
-async def ingresar_clave(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["clave"] = update.message.text.strip()
-    await update.message.reply_text("📅 ¿Cuántos días será válida?")
+    await update.message.reply_text("📅 ¿Cuántos días será válida la clave?")
     return DIAS
 
-async def ingresar_dias(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    dias = int(update.message.text.strip())
+async def recibir_dias(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        dias = int(update.message.text.strip())
+    except:
+        await update.message.reply_text("❌ Ingresa un número válido de días.")
+        return DIAS
+
     correo = context.user_data["correo"]
-    clave = context.user_data["clave"]
-    expira = (datetime.datetime.now() + datetime.timedelta(days=dias)).isoformat()
+    clave = generar_clave()
+    fecha_exp = (datetime.datetime.now() + datetime.timedelta(days=dias)).strftime("%Y-%m-%d")
 
     claves = cargar_claves()
-    claves[correo] = {"key": clave, "expira": expira}
+    claves[clave] = {"correo": correo, "expira": fecha_exp}
     guardar_claves(claves)
 
-    await update.message.reply_text(f"✅ Clave creada para {correo} válida por {dias} días.")
+    mensaje = f"🔑 ENVÍA ESTO A TU CLIENTE:\n/codigo {correo} {clave}\n\n✅ Puede recibir códigos durante {dias} días."
+    await update.message.reply_text(mensaje)
     return ConversationHandler.END
 
-async def cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🚫 Operación cancelada.")
-    return ConversationHandler.END
-
-# /codigo
-async def obtener_codigo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-    user_id = update.effective_user.id
-
-    if len(args) != 2:
-        await update.message.reply_text("❌ Usa el comando así:\n/codigo correo clave")
+async def codigo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        correo, clave = context.args[0], context.args[1]
+    except:
+        await update.message.reply_text("❌ Formato incorrecto. Usa: /codigo correo clave")
         return
 
-    correo, clave = args
     claves = cargar_claves()
-
-    if correo not in claves:
-        await update.message.reply_text("❌ No tienes una clave activa.")
+    if clave not in claves:
+        await update.message.reply_text("❌ Clave inválida.")
         return
 
-    data = claves[correo]
-    if clave != data["key"]:
-        await update.message.reply_text("❌ Clave incorrecta.")
+    datos = claves[clave]
+    if datos["correo"] != correo:
+        await update.message.reply_text("❌ Esta clave no corresponde con ese correo.")
         return
 
-    expira = datetime.datetime.fromisoformat(data["expira"])
-    if datetime.datetime.now() > expira:
-        await update.message.reply_text("⛔ Tu clave ha expirado.")
+    fecha_exp = datetime.datetime.strptime(datos["expira"], "%Y-%m-%d")
+    if datetime.datetime.now() > fecha_exp:
+        await update.message.reply_text("⛔ La clave ha expirado.")
         return
 
-    # Control de espera mínima (1 minuto)
-    ultimo_uso = USUARIOS_ULTIMO_USO.get(user_id)
-    ahora = datetime.datetime.now()
-    if ultimo_uso and (ahora - ultimo_uso).total_seconds() < 60:
-        await update.message.reply_text("⏱️ Espera 1 minuto antes de volver a pedir un código.")
-        return
-
-    USUARIOS_ULTIMO_USO[user_id] = ahora
-
-    # Lógica para buscar el código en Gmail (solo muestra mensaje por ahora)
-    await update.message.reply_text("🔍 Buscando código en Gmail...")
-    # Aquí agregarás la conexión a Gmail con IMAP y extracción del código
-
-    # Simulando un código encontrado:
-    await update.message.reply_text("✅ Tu código Disney+ es: 259535\n🔓 Acceso satisfactorio.")
-
-# MAIN
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("codigo", obtener_codigo))
-
-    conv = ConversationHandler(
-        entry_points=[CommandHandler("crear_key", crear_key)],
-        states={
-            CORREO: [MessageHandler(filters.TEXT & ~filters.COMMAND, ingresar_correo)],
-            CLAVE: [MessageHandler(filters.TEXT & ~filters.COMMAND, ingresar_clave)],
-            DIAS: [MessageHandler(filters.TEXT & ~filters.COMMAND, ingresar_dias)],
-        },
-        fallbacks=[CommandHandler("cancelar", cancelar)],
+    dias_restantes = (fecha_exp - datetime.datetime.now()).days
+    await update.message.reply_text(
+        f"✅ Registro exitoso.\nPodrás recibir códigos del correo {correo} durante {dias_restantes} días."
     )
-    app.add_handler(conv)
 
-    print("🤖 Bot en ejecución...")
-    app.run_polling()
+# --- Main ---
+app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("codigo", codigo))
+
+crear_handler = ConversationHandler(
+    entry_points=[CommandHandler("crear_key", crear_key)],
+    states={
+        CORREO: [MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_correo)],
+        DIAS: [MessageHandler(filters.TEXT & ~filters.COMMAND, recibir_dias)],
+    },
+    fallbacks=[],
+)
+app.add_handler(crear_handler)
+
+print("🤖 Bot en ejecución...")
+app.run_polling()
