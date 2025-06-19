@@ -8,7 +8,7 @@ import os
 
 # Configura tu token y tu ID de admin
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = 123456789  # <- Reemplaza con tu verdadero ID (el bot te lo dice al usar /start)
+ADMIN_ID = 6828410834  # <- Reemplaza con tu verdadero ID (el bot te lo dice al usar /start)
 
 # Configuración del log
 logging.basicConfig(level=logging.INFO)
